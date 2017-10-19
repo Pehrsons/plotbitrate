@@ -176,6 +176,7 @@ with subprocess.Popen(
 
         bitrate = size/duration
         bitrate_data[ftype].append((time, bitrate))
+        # sys.stderr.write("Adding frame, type {} time={} bitrate={} size={} duration={}\n".format(ftype, time, bitrate, size, duration))
 
 # end frame subprocess
 
