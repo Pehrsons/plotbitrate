@@ -66,6 +66,8 @@ parser.add_argument('-s', '--stream', help="stream type",
 parser.add_argument('-o', '--output', help="output file")
 parser.add_argument('-f', '--format', help="output file format",
     choices=format_list)
+parser.add_argument('-p', '--plot', help="what to plot on the y-axis per frame",
+    choices=["bitrate", "size"], default="bitrate")
 parser.add_argument('--min', help="set plot minimum (kbps)", type=int)
 parser.add_argument('--max', help="set plot maximum (kbps)", type=int)
 args = parser.parse_args()
@@ -152,7 +154,7 @@ with subprocess.Popen(
         sys.stderr.write("Error: No frame data, failed to execute ffprobe\n")
         sys.exit(1)
 
-    if frame_count == 1 and not frame_list[0][3]:
+    if frame_count == 1 and not frame_list[0][3] and args.plot == "bitrate":
         sys.stderr.write("Error: Only one frame, duration unknown\n")
         sys.exit(1)
 
@@ -166,25 +168,32 @@ with subprocess.Popen(
         if ftype not in bitrate_data:
             bitrate_data[ftype] = []
 
-        if not duration:
-            if frame == frames[-1]:
-                # This is an approximation.
-                # We assume the last frame has the same duration as the one before.
-                duration = time - frames[i - 1][0]
-            else:
-                duration = frames[i + 1][0] - time
+        if args.plot == "bitrate":
+            if not duration:
+                if frame == frames[-1]:
+                    # This is an approximation.
+                    # We assume the last frame has the same duration as the one before.
+                    duration = time - frames[i - 1][0]
+                else:
+                    duration = frames[i + 1][0] - time
 
-        bitrate = size/duration
-        bitrate_data[ftype].append((time, bitrate))
-        # sys.stderr.write("Adding frame, type {} time={} bitrate={} size={} duration={}\n".format(ftype, time, bitrate, size, duration))
+            bitrate = size/duration
+            bitrate_data[ftype].append((time, bitrate))
+            # sys.stderr.write("Adding frame, type {} time={} bitrate={} size={} duration={}\n".format(ftype, time, bitrate, size, duration))
+        elif args.plot == "size":
+            bitrate_data[ftype].append((time, size))
 
 # end frame subprocess
 
 # setup new figure
 matplot.figure().canvas.set_window_title(args.input)
-matplot.title("Stream Bitrate vs Time")
 matplot.xlabel("Time (sec)")
-matplot.ylabel("Frame Bitrate (kbit/s)")
+if args.plot == "bitrate":
+    matplot.title("Stream Bitrate vs Time")
+    matplot.ylabel("Frame Bitrate (kbit/s)")
+elif args.plot == "size":
+    matplot.title("Frame Size vs Time")
+    matplot.ylabel("Frame Size (kbit)")
 matplot.grid(True)
 
 # map frame type to color
