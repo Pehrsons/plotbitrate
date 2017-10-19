@@ -81,8 +81,8 @@ if args.min and args.max and (args.min >= args.max):
     sys.exit(1)
 
 bitrate_data = {}
+frames = []
 frame_count = 0
-frame_rate = None
 frame_time = 0.0
 
 # get frame data for the selected stream
@@ -113,35 +113,6 @@ with subprocess.Popen(
         else:
             frame_type = node.get('pict_type')
 
-        # get frame rate only once (assumes non-variable framerate)
-        # TODO: use 'pkt_duration_time' each time instead
-        if frame_rate is None:
-
-            # audio frame rate, 1 / frame duration
-            if args.stream == 'audio':
-                frame_rate = 1.0 / float(node.get('pkt_duration_time'))
-
-            # video frame rate, read stream header
-            else:
-                with subprocess.Popen(
-                    ["ffprobe",
-                        "-show_entries", "stream",
-                        "-select_streams", "v",
-                        "-print_format", "xml",
-                        args.input
-                    ],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.DEVNULL) as proc_stream:
-
-                    # parse stream header xml
-                    stream_data = etree.parse(proc_stream.stdout)
-                    stream_elem = stream_data.find('.//stream')
-
-                    # compute frame rate from ratio
-                    frame_rate_ratio = stream_elem.get('avg_frame_rate')
-                    (dividend, divisor) = frame_rate_ratio.split('/')
-                    frame_rate = float(dividend) / float(divisor)
-
         #
         # frame time (x-axis):
         #
@@ -153,7 +124,7 @@ with subprocess.Popen(
         #   converted to kbits which everyone is use to. To get instantaneous
         #   frame bitrate we must consider the frame duration.
         #
-        #   bitrate = (kbits / frame) * (frame / sec) = (kbits / sec)
+        #   bitrate = (kbits / frame) / (duration in sec) = (kbits / sec)
         #
 
         # collect frame data
@@ -166,20 +137,45 @@ with subprocess.Popen(
                 if frame_count > 1:
                     frame_time += float(node.get('pkt_duration_time'))
 
-        frame_bitrate = (float(node.get('pkt_size')) * 8 / 1000) * frame_rate
-        frame = (frame_time, frame_bitrate)
+        frame_size = float(node.get('pkt_size')) * 8 / 1000
+        try:
+            duration = float(node.get('pkt_duration_time'))
+        except:
+            duration = None
+        frame = (frame_time, frame_type, frame_size, duration)
 
-        # create new frame list if new type
-        if frame_type not in bitrate_data:
-            bitrate_data[frame_type] = []
-
-        # append frame to list by type
-        bitrate_data[frame_type].append(frame)
+        # append frame to global ordered list
+        frames.append(frame)
 
     # check if ffprobe was successful
     if frame_count == 0:
         sys.stderr.write("Error: No frame data, failed to execute ffprobe\n")
         sys.exit(1)
+
+    if frame_count == 1 and not frame_list[0][3]:
+        sys.stderr.write("Error: Only one frame, duration unknown\n")
+        sys.exit(1)
+
+    # Process frames with duration
+    for i, frame in enumerate(frames):
+        time = frame[0]
+        ftype = frame[1]
+        size = frame[2]
+        duration = frame[3]
+        # create new frame list if new type
+        if ftype not in bitrate_data:
+            bitrate_data[ftype] = []
+
+        if not duration:
+            if frame == frames[-1]:
+                # This is an approximation.
+                # We assume the last frame has the same duration as the one before.
+                duration = time - frames[i - 1][0]
+            else:
+                duration = frames[i + 1][0] - time
+
+        bitrate = size/duration
+        bitrate_data[ftype].append((time, bitrate))
 
 # end frame subprocess
 
